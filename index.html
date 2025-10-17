@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WebXR 원추 이중 헬릭스 + 멀티 비디오 스크린 (선택 재생/플레이리스트 + 앞부분 재생)</title>
+<style>
+  :root{color-scheme:dark}
+  html,body{margin:0;height:100%;background:#000;font-family:system-ui,Segoe UI,Roboto,Apple SD Gothic Neo,Malgun Gothic,sans-serif}
+  #ui{position:fixed;left:12px;top:12px;z-index:20;background:rgba(0,0,0,.72);color:#fff;padding:12px 14px;border-radius:14px;min-width:400px;max-width:min(92vw,680px);backdrop-filter:blur(6px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+  #ui h3{margin:0 0 8px;font-size:16px}
+  #ui h4{margin:14px 0 6px;font-size:14px;opacity:.9}
+  #ui label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0}
+  #row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+  #ui input[type="number"],#ui input[type="range"],#ui input[type="text"]{width:220px}
+  #status{opacity:.95;font-size:12px}
+  #pointsCanvas{position:fixed;right:12px;top:12px;width:min(36vw,420px);aspect-ratio:1/1;background:#111;border:1px solid #333;border-radius:12px}
+  #hint{position:fixed;right:16px;top:14px;color:#bbb;font-size:12px}
+  button{cursor:pointer;border-radius:10px;padding:8px 12px;border:1px solid #333;background:#181818;color:#fff}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  small.mono{font-family:ui-monospace,Consolas,Monaco,monospace;opacity:.9}
+
+  /* 비디오 리스트 */
+  #videoListBox{margin-top:6px;border:1px solid #333;border-radius:10px;padding:8px;background:#0f0f0f}
+  #videoListHead{display:flex;align-items:center;justify-content:space-between}
+  #videoCount{font-size:12px;opacity:.85}
+  #videoList{list-style:none;margin:6px 0 0;padding:0;max-height:220px;overflow:auto}
+  #videoList li{display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;border:1px solid #242424;margin:4px 0}
+  #videoList li:hover{background:#141414}
+  #videoList li.active{border-color:#7fb3ff;background:#111a24}
+  .badge{font-size:11px;opacity:.85;border:1px solid #333;border-radius:6px;padding:2px 6px}
+  .truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+  .order{min-width:44px;text-align:center}
+</style>
+</head>
+<body>
+<div id="ui">
+  <h3>WebXR 원추 이중 헬릭스</h3>
+  <div id="row">
+    <button id="startBtn">시작</button>
+    <button id="stopBtn">중지</button>
+    <button id="enterVR">VR 시작</button>
+  </div>
+
+  <label>라인 총 수(생성 후보) <input id="pool" type="number" min="200" max="4000" step="50" value="1200"></label>
+  <label>선택 수(A+B) <input id="pick" type="number" min="100" max="1200" step="10" value="200"></label>
+  <label>기본 반경(px) <input id="rangeR" type="range" min="60" max="900" step="5" value="300"></label>
+  <label>높이(m) <input id="height" type="range" min="2" max="8" step="0.1" value="4.0"></label>
+  <label>회전 속도 <input id="spin" type="range" min="0.0" max="8" step="0.1" value="2.4"></label>
+  <label>꼬임 주기 <input id="twist" type="range" min="80" max="1600" step="10" value="520"></label>
+  <label>기울기 오프셋(m) <input id="tilt" type="range" min="0.00" max="0.60" step="0.01" value="0.22"></label>
+  <label>색상 부드러움 <input id="smoothAlpha" type="range" min="0.01" max="0.5" step="0.01" value="0.14"></label>
+
+  <h4>VR 스크린(사막 영상) — 최대 10개 관리 · 선택 재생</h4>
+  <div id="row">
+    <button id="screenToggle">스크린 켜기</button>
+    <button id="loadSample">사막 샘플 추가</button>
+  </div>
+  <label>영상 파일(여러 개 선택 가능)
+    <input id="desertFiles" type="file" accept="video/*" multiple>
+  </label>
+  <div id="row" style="gap:6px">
+    <input id="desertUrl" type="text" placeholder="https://예시-사막.mp4" />
+    <button id="addUrl">목록에 추가</button>
+  </div>
+  <div id="videoListBox">
+    <div id="videoListHead">
+      <div><strong>업로드/추가 목록</strong></div>
+      <div id="videoCount">0 / 10</div>
+    </div>
+    <div id="row" style="justify-content:flex-end">
+      <button id="scrollUpBtn">리스트 ↑</button>
+      <button id="scrollDownBtn">리스트 ↓</button>
+    </div>
+    <ul id="videoList"></ul>
+    <div id="row">
+      <button id="prevBtn">이전</button>
+      <button id="nextBtn">다음</button>
+      <button id="playSelectedBtn">선택 재생</button>
+      <button id="clearSelectedBtn">선택 초기화</button>
+      <span id="nowPlaying" style="font-size:12px;opacity:.85"></span>
+    </div>
+  </div>
+
+  <label>스크린 거리(m) <input id="screenDist" type="range" min="3" max="30" step="0.5" value="10"></label>
+  <label>스크린 폭(m, 16:9) <input id="screenWidth" type="range" min="4" max="24" step="0.5" value="12"></label>
+  <label>음소거 <input id="mute" type="checkbox" checked></label>
+
+  <h4>앞부분만 재생(트레일러 모드)</h4>
+  <label>사용 <input id="snippetMode" type="checkbox" checked></label>
+  <label>재생 시간(초)
+    <input id="snippetSec" type="range" min="10" max="180" step="10" value="10">
+    <span id="snippetSecLabel">10s</span>
+  </label>
+
+  <div id="status">상태: 오른쪽 패널에서 점 7개를 찍어 시드를 만드세요.</div>
+  <div style="margin-top:6px"><small class="mono">팁: 체크박스로 여러 개 선택 후 <strong>선택 재생</strong>을 누르면 선택한 순서대로 재생됩니다. 항목명을 클릭하면 즉시 해당 영상만 재생됩니다.</small></div>
+</div>
+
+<canvas id="pointsCanvas"></canvas>
+<div id="hint">점 패널 — 클릭/터치(7개). VR에선 정면 보드 찍기</div>
+
+<script type="module">
+import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js";
+
+/* =========================
+   기존 UI 참조
+========================= */
+const ui={
+  start:document.getElementById('startBtn'),
+  stop:document.getElementById('stopBtn'),
+  enterVR:document.getElementById('enterVR'),
+  pool:document.getElementById('pool'),
+  pick:document.getElementById('pick'),
+  rangeR:document.getElementById('rangeR'),
+  height:document.getElementById('height'),
+  spin:document.getElementById('spin'),
+  twist:document.getElementById('twist'),
+  tilt:document.getElementById('tilt'),
+  smoothAlpha:document.getElementById('smoothAlpha'),
+  status:document.getElementById('status'),
+  // 스크린 관련
+  screenToggle:document.getElementById('screenToggle'),
+  loadSample:document.getElementById('loadSample'),
+  desertFiles:document.getElementById('desertFiles'),
+  desertUrl:document.getElementById('desertUrl'),
+  addUrl:document.getElementById('addUrl'),
+  screenDist:document.getElementById('screenDist'),
+  screenWidth:document.getElementById('screenWidth'),
+  mute:document.getElementById('mute'),
+  videoList:document.getElementById('videoList'),
+  videoCount:document.getElementById('videoCount'),
+  nowPlaying:document.getElementById('nowPlaying'),
+  prevBtn:document.getElementById('prevBtn'),
+  nextBtn:document.getElementById('nextBtn'),
+  playSelectedBtn:document.getElementById('playSelectedBtn'),
+  clearSelectedBtn:document.getElementById('clearSelectedBtn'),
+  // 스크롤 보조 버튼
+  scrollUpBtn:document.getElementById('scrollUpBtn'),
+  scrollDownBtn:document.getElementById('scrollDownBtn'),
+  // 트레일러 모드
+  snippetMode:document.getElementById('snippetMode'),
+  snippetSec:document.getElementById('snippetSec'),
+  snippetSecLabel:document.getElementById('snippetSecLabel'),
+};
+
+/* =========================
+   점 7개 → 시드
+========================= */
+const pCanvas=document.getElementById('pointsCanvas');
+const pCtx=pCanvas.getContext('2d');
+let P_W=360,P_H=360; let points=[];
+function resizePointCanvas(){
+  const rect=pCanvas.getBoundingClientRect();
+  const dpr=Math.max(1,window.devicePixelRatio||1);
+  pCanvas.width=Math.floor(rect.width*dpr);
+  pCanvas.height=Math.floor(rect.height*dpr);
+  P_W=pCanvas.width; P_H=pCanvas.height; drawPoints();
+}
+function drawPoints(){
+  pCtx.fillStyle='#0d0d0d'; pCtx.fillRect(0,0,P_W,P_H);
+  pCtx.strokeStyle='#1b1b1b'; pCtx.lineWidth=1;
+  for(let i=0;i<=10;i++){ const x=(P_W/10)*i,y=(P_H/10)*i; pCtx.beginPath(); pCtx.moveTo(x,0); pCtx.lineTo(x,P_H); pCtx.stroke(); pCtx.beginPath(); pCtx.moveTo(0,y); pCtx.lineTo(P_W,y); pCtx.stroke(); }
+  if(points.length){
+    pCtx.fillStyle='#ffee66';
+    for(const p of points){ pCtx.beginPath(); pCtx.arc(p.x,p.y,8,0,Math.PI*2); pCtx.fill(); }
+    pCtx.strokeStyle='#ffeb3b'; pCtx.lineWidth=3; pCtx.beginPath(); pCtx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<points.length;i++) pCtx.lineTo(points[i].x,points[i].y);
+    if(points.length===7) pCtx.lineTo(points[0].x,points[0].y);
+    pCtx.stroke();
+  }
+}
+function addPointXY(clientX,clientY){
+  if(points.length>=7) return;
+  const rect=pCanvas.getBoundingClientRect(); const dpr=Math.max(1,window.devicePixelRatio||1);
+  const x=(clientX-rect.left)*dpr; const y=(clientY-rect.top)*dpr;
+  if(x<0||y<0||x>rect.width*dpr||y>rect.height*dpr) return;
+  points.push({x,y}); drawPoints(); ui.status.textContent=`상태: 점 ${points.length}/7`;
+}
+function handlePointer(e){ if(e.type==='pointerdown'||e.type==='mousedown'){ addPointXY(e.clientX,e.clientY); } else if(e.type==='touchstart'){ const t=e.changedTouches&&e.changedTouches[0]; if(t) addPointXY(t.clientX,t.clientY); } }
+pCanvas.addEventListener('pointerdown',handlePointer,{passive:true});
+pCanvas.addEventListener('mousedown',handlePointer,{passive:true});
+pCanvas.addEventListener('touchstart',e=>{e.preventDefault();handlePointer(e)},{passive:false});
+pCanvas.addEventListener('dblclick',()=>{points=[];drawPoints();ui.status.textContent='상태: 점 0/7';});
+window.addEventListener('resize',resizePointCanvas); resizePointCanvas();
+
+/* =========================
+   RNG
+========================= */
+function computeSeed(){ let s=0; points.forEach((p,i)=>{ s^=((p.x+p.y)|0)<<(i%31); }); return (s>>>0)||0x9e3779b9; }
+function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
+let rng=mulberry32(0x1234abcd);
+
+/* =========================
+   Three.js / WebXR
+========================= */
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x000000);
+const camera=new THREE.PerspectiveCamera(70,window.innerWidth/window.innerHeight,0.01,100);
+camera.position.set(0,1.6,2.2);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+renderer.xr.enabled=true;
+document.body.appendChild(renderer.domElement);
+
+// floor
+const floor=new THREE.Mesh(
+  new THREE.PlaneGeometry(20,20),
+  new THREE.MeshBasicMaterial({color:0x080808,transparent:true,opacity:0.9,side:THREE.DoubleSide})
+);
+floor.rotation.x=-Math.PI/2; floor.position.y=0; scene.add(floor);
+
+const light=new THREE.AmbientLight(0xffffff,0.9); scene.add(light);
+
+// VR button with DOM overlay enabled (VR 내 DOM 스크롤/클릭 가능)
+ui.enterVR.addEventListener('click',()=>{
+  const btn=VRButton.createButton(renderer, {
+    requiredFeatures: ['local-floor','dom-overlay'],
+    domOverlay: { root: document.body }
+  });
+  btn.style.display='none';
+  document.body.appendChild(btn);
+  btn.click();
+});
+
+/* =========================
+   사막 스크린 (영상 플레인) + 선택 재생 + 트레일러 모드
+========================= */
+let screenMesh=null, videoTex=null;
+const videoEl=document.createElement('video');
+videoEl.crossOrigin = "anonymous";
+videoEl.playsInline = true;
+videoEl.loop = false; // 플레이리스트/앞부분 재생을 위해 loop 비활성
+videoEl.muted = ui.mute.checked;
+
+// 비디오 리스트 상태
+const MAX_ITEMS=10;
+const videos=[]; // {name, url, source: 'file'|'url'|'sample'}
+let playingIndex=-1;
+let queueMode=false; // 선택 재생 모드
+let queueList=[];    // 인덱스 배열 (선택 순서)
+let queuePos=0;      // 현재 위치 (선택 모드)
+
+// 트레일러(앞부분) 재생 설정
+let snippetEnabled=true;
+let snippetSeconds=10;
+
+function ensureScreen(){
+  const dist = Number(ui.screenDist.value)||10;
+  const width = Number(ui.screenWidth.value)||12;
+  const height = width * 9/16; // 16:9
+  if(!screenMesh){
+    const geo = new THREE.PlaneGeometry(width, height);
+    const mat = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.FrontSide});
+    screenMesh = new THREE.Mesh(geo, mat);
+    screenMesh.position.set(0, 1.6, -dist);
+    scene.add(screenMesh);
+  }else{
+    screenMesh.geometry.dispose();
+    screenMesh.geometry = new THREE.PlaneGeometry(width, height);
+    screenMesh.position.z = -dist;
+  }
+  screenMesh.visible = true;
+  ui.screenToggle.textContent = "스크린 끄기";
+}
+
+function setVideoSrcAndPlay(src, label){
+  try{
+    videoEl.src = src;
+    videoEl.muted = ui.mute.checked;
+    const onLoaded=()=>{
+      videoEl.removeEventListener('loadedmetadata', onLoaded);
+      if(snippetEnabled){ videoEl.currentTime = 0; }
+    };
+    videoEl.addEventListener('loadedmetadata', onLoaded);
+
+    videoEl.play().then(()=>{
+      if(!videoTex){
+        videoTex = new THREE.VideoTexture(videoEl);
+        videoTex.colorSpace = THREE.SRGBColorSpace;
+        videoTex.minFilter = THREE.LinearFilter;
+        videoTex.magFilter = THREE.LinearFilter;
+      }
+      ensureScreen();
+      screenMesh.material.map = videoTex;
+      screenMesh.material.needsUpdate = true;
+      ui.status.textContent = `상태: 재생 중 — ${label||'영상'}`;
+      ui.nowPlaying.textContent = `현재 재생: ${label||'영상'}`;
+      renderVideoList();
+    }).catch(err=>{
+      console.warn(err);
+      ui.status.textContent = "상태: 자동재생 실패 — 항목을 다시 클릭/재생해 주세요.";
+    });
+  }catch(e){
+    console.warn(e);
+  }
+}
+
+function getSequenceIndices(){
+  // 선택 재생 중이면 선택 순서, 아니면 전체 목록 순서
+  if(queueMode && queueList.length>0) return queueList.slice();
+  return videos.map((_,i)=>i);
+}
+
+function gotoNextInSequence(){
+  const seq=getSequenceIndices();
+  if(seq.length===0) return;
+  let currentPos = seq.indexOf(playingIndex);
+  if(currentPos===-1){ currentPos= -1; }
+  const nextPos = currentPos + 1;
+  if(nextPos < seq.length){
+    const nextIdx = seq[nextPos];
+    ui.nowPlaying.textContent = `현재 재생: ${videos[nextIdx].name} (${Math.min(nextPos+1,seq.length)}/${seq.length})`;
+    playVideoAt(nextIdx, {fromQueue: queueMode});
+  }else{
+    // 끝났을 때 큐 모드 해제
+    queueMode=false; queueList=[]; queuePos=0;
+    ui.status.textContent='상태: 순차 재생 완료';
+  }
+}
+
+// 앞부분(초)만 재생: currentTime 감시하여 초과 시 다음으로
+videoEl.addEventListener('timeupdate', ()=>{
+  if(snippetEnabled && videoEl.duration && videoEl.currentTime >= Math.min(snippetSeconds, Math.max(0, videoEl.duration-0.1)) ){
+    gotoNextInSequence();
+  }
+});
+
+/* =========================
+   선택/목록/파일/URL 처리
+========================= */
+// 선택 상태(선택 순서를 유지)
+let selectionOrder=[]; // 인덱스를 선택한 순서대로
+
+function addVideoItem(name, url, source){
+  if(videos.length>=MAX_ITEMS){ alert(`최대 ${MAX_ITEMS}개까지만 추가할 수 있습니다.`); return false; }
+  videos.push({name, url, source});
+  renderVideoList();
+  return true;
+}
+
+function renderVideoList(){
+  ui.videoList.innerHTML='';
+  ui.videoCount.textContent = `${videos.length} / ${MAX_ITEMS}`;
+
+  const orderMap=new Map();
+  selectionOrder.forEach((idx, i)=> orderMap.set(idx, i+1));
+
+  videos.forEach((v,idx)=>{
+    const li=document.createElement('li');
+    li.dataset.index=idx;
+    if(idx===playingIndex) li.classList.add('active');
+
+    const chk=document.createElement('input');
+    chk.type='checkbox';
+    chk.checked = orderMap.has(idx);
+    chk.addEventListener('change', (ev)=> toggleSelect(idx, ev.target.checked));
+
+    const order=document.createElement('span');
+    order.className='badge order';
+    const ord=orderMap.get(idx);
+    order.textContent = ord? `선택${ord}` : '';
+
+    const badge=document.createElement('span');
+    badge.className='badge';
+    badge.textContent = idx===playingIndex? '▶ 재생중' : (v.source==='file'?'파일': (v.source==='url'?'URL':'샘플'));
+
+    const name=document.createElement('span');
+    name.className='truncate';
+    name.title=v.name;
+    name.textContent=v.name;
+    name.style.cursor='pointer';
+    name.addEventListener('click',()=>{ playVideoAt(idx); });
+
+    li.appendChild(chk);
+    li.appendChild(order);
+    li.appendChild(badge);
+    li.appendChild(name);
+    ui.videoList.appendChild(li);
+  });
+}
+
+function toggleSelect(idx, checked){
+  if(checked){
+    if(!selectionOrder.includes(idx)) selectionOrder.push(idx);
+  }else{
+    selectionOrder = selectionOrder.filter(i=>i!==idx);
+  }
+  renderVideoList();
+}
+
+function playVideoAt(idx, opts={fromQueue:false}){
+  if(idx<0 || idx>=videos.length) return;
+  if(!opts.fromQueue){ queueMode=false; queueList=[]; queuePos=0; }
+  playingIndex = idx;
+  const item = videos[idx];
+  ensureScreen();
+  setVideoSrcAndPlay(item.url, item.name);
+}
+
+function startSelectedPlayback(){
+  if(selectionOrder.length===0){ alert('선택된 영상이 없습니다. 체크박스로 하나 이상 선택하세요.'); return; }
+  queueMode = true;
+  queueList = selectionOrder.slice(); // 선택한 순서
+  queuePos = 0;
+  const firstIdx = queueList[0];
+  ui.nowPlaying.textContent = `현재 재생: ${videos[firstIdx].name} (1/${queueList.length})`;
+  playVideoAt(firstIdx, {fromQueue:true});
+}
+
+// 파일 여러 개 추가
+ui.desertFiles.addEventListener('change', (e)=>{
+  const files = Array.from(e.target.files||[]);
+  if(!files.length) return;
+  const remain = MAX_ITEMS - videos.length;
+  if(remain<=0){ alert(`이미 ${MAX_ITEMS}개가 채워졌습니다.`); return; }
+  const slice = files.slice(0, remain);
+  slice.forEach((f)=>{
+    const url = URL.createObjectURL(f);
+    addVideoItem(f.name, url, 'file');
+  });
+  if(playingIndex<0 && videos.length>0){ playVideoAt(0); }
+  ui.desertFiles.value='';
+});
+
+// URL 추가
+ui.addUrl.addEventListener('click', ()=>{
+  const url = (ui.desertUrl.value||'').trim();
+  if(!url){ alert('영상 URL을 입력하세요.'); return; }
+  const name = url.split('/').pop()||'영상(URL)';
+  if(addVideoItem(name, url, 'url')){
+    ui.status.textContent = '상태: URL이 목록에 추가되었습니다.';
+  }
+});
+
+// 샘플 추가 (Coverr 공개 샘플)
+ui.loadSample.addEventListener('click', ()=>{
+  const sample = "https://cdn.coverr.co/videos/coverr-sand-dunes-1619/1080p.mp4";
+  addVideoItem('사막 샘플(mp4)', sample, 'sample');
+});
+
+// 선택 재생 / 선택 초기화
+ui.playSelectedBtn.addEventListener('click', startSelectedPlayback);
+ui.clearSelectedBtn.addEventListener('click', ()=>{ selectionOrder=[]; renderVideoList(); });
+
+// 트레일러 모드 UI
+ui.snippetMode.addEventListener('change', ()=>{ snippetEnabled = ui.snippetMode.checked; });
+ui.snippetSec.addEventListener('input', ()=>{ snippetSeconds = Number(ui.snippetSec.value)||10; ui.snippetSecLabel.textContent = `${snippetSeconds}s`; });
+snippetEnabled = true; snippetSeconds = 10; ui.snippetSecLabel.textContent = '10s';
+
+// 리스트 스크롤(버튼) — VR DOM overlay에서 스크롤다운 대체
+ui.scrollUpBtn.addEventListener('click', ()=>{ ui.videoList.scrollTop = Math.max(0, ui.videoList.scrollTop - ui.videoList.clientHeight*0.8); });
+ui.scrollDownBtn.addEventListener('click', ()=>{ ui.videoList.scrollTop = ui.videoList.scrollTop + ui.videoList.clientHeight*0.8; });
+
+// 자연 종료 시 다음으로
+videoEl.addEventListener('ended', ()=>{ gotoNextInSequence(); });
+
+/* =========================
+   원추 이중 헬릭스
+========================= */
+const palette=[0x32cd32,0x00ff7f,0x9acd32,0xffff00,0xffd700,0xf0e68c,0x9370db,0x8a2be2,0xba55d3,0x1e90ff,0x87cefa,0xff6347,0xff4500].map(v=>new THREE.Color(v));
+
+const state={
+  running:false,
+  pool:1200,
+  pick:200,
+  height:4.0,
+  segY:220,
+  objsA:[], objsB:[],
+  colNowA:[], colNowB:[], colTgtA:[], colTgtB:[],
+};
+
+function initHelices(){
+  for(const o of state.objsA) scene.remove(o); for(const o of state.objsB) scene.remove(o);
+  state.objsA.length=0; state.objsB.length=0; state.colNowA.length=0; state.colNowB.length=0; state.colTgtA.length=0; state.colTgtB.length=0;
+
+  const seg=state.segY; const geomT=new THREE.BufferGeometry(); geomT.setAttribute('position',new THREE.BufferAttribute(new Float32Array(seg*3),3));
+
+  const poolN=Math.max(200,Math.min(4000,Number(ui.pool.value)||1200));
+  const pickN=Math.max(100,Math.min(poolN,Number(ui.pick.value)||200));
+  const pickHalf=Math.floor(pickN/2);
+
+  const sd=computeSeed(); rng=mulberry32(sd); ui.status.textContent=`상태: 시드 0x${sd.toString(16)} / 선택 ${pickN}개 (A ${pickHalf}, B ${pickN-pickHalf})`;
+
+  const chosen=new Set(); while(chosen.size<pickN){ const idx=Math.floor(rng()*poolN); chosen.add(idx); }
+  function newLine(){ const g=geomT.clone(); const m=new THREE.LineBasicMaterial({vertexColors:false}); const l=new THREE.Line(g,m); scene.add(l); return l; }
+
+  for(let i=0;i<pickHalf;i++){
+    const line=newLine(); state.objsA.push(line);
+    const c=palette[Math.floor(rng()*palette.length)].clone(); const t=palette[Math.floor(rng()*palette.length)].clone();
+    state.colNowA.push(c); state.colTgtA.push(t);
+  }
+  for(let i=pickHalf;i<pickN;i++){
+    const line=newLine(); state.objsB.push(line);
+    const c=palette[Math.floor(rng()*palette.length)].clone(); const t=palette[Math.floor(rng()*palette.length)].clone();
+    state.colNowB.push(c); state.colTgtB.push(t);
+  }
+}
+
+function retargetColors(){
+  const changeCount=Math.max(1,Math.floor((state.objsA.length+state.objsB.length)*0.3));
+  for(let k=0;k<changeCount;k++){
+    const list=Math.random()<0.5?state.colTgtA:state.colTgtB; const i=Math.floor(Math.random()*list.length);
+    list[i]=palette[Math.floor(Math.random()*palette.length)].clone();
+  }
+}
+let colorTimer=null;
+function startColorTimer(){ if(colorTimer) clearInterval(colorTimer); colorTimer=setInterval(retargetColors, 2200); }
+function stopColorTimer(){ if(colorTimer){ clearInterval(colorTimer); colorTimer=null; } }
+
+const clock=new THREE.Clock();
+function animate(){ renderer.setAnimationLoop(render); }
+function render(){
+  const t=clock.getElapsedTime();
+  if(state.running){ updateHelixLines(t); }
+  renderer.render(scene,camera);
+}
+
+function updateHelixLines(t){
+  const seg=state.segY; const stepY=Number(ui.height.value||4.0)/(seg-1);
+  const baseR=(Number(ui.rangeR.value)||300)/300 * 0.9;
+  const spin=Number(ui.spin.value)||2.4; const twist=Number(ui.twist.value)||520; const tilt=Number(ui.tilt.value)||0.22; const smooth=Number(ui.smoothAlpha.value)||0.14;
+
+  function updateGroup(list, colNow, colTgt, phaseSign){
+    for(let i=0;i<list.length;i++){
+      const line=list[i];
+      colNow[i].lerp(colTgt[i], smooth); line.material.color.copy(colNow[i]);
+      const pos=line.geometry.attributes.position.array; let p=0;
+      const phase0 = i * (Math.PI*2/24) + i*0.0013;
+      for(let s=0;s<seg;s++){
+        const H = Number(ui.height.value||4.0);
+        const y = - H/2 + s*stepY;
+        const hNorm=(y + H/2) / H;
+        const radius = baseR * Math.pow(1 - hNorm, 0.85);
+        const phase = (y / (twist/1000)) * Math.PI*2 + t*spin*phaseSign + phase0;
+        const x = Math.sin(phase) * radius + (phaseSign>0? +tilt : -tilt);
+        const z = Math.cos(phase) * radius;
+        pos[p++]=x; pos[p++]=1.0 + y; pos[p++]=z;
+      }
+      line.geometry.attributes.position.needsUpdate=true;
+    }
+  }
+
+  updateGroup(state.objsA, state.colNowA, state.colTgtA, +1);
+  updateGroup(state.objsB, state.colNowB, state.colTgtB, -1);
+}
+
+/* 버튼 */
+ui.start.addEventListener('click',()=>{
+  if(points.length!==7){ alert('점 7개를 먼저 찍어주세요.'); return; }
+  initHelices(); state.running=true; startColorTimer();
+});
+ui.stop.addEventListener('click',()=>{ state.running=false; stopColorTimer(); ui.status.textContent='상태: 중지됨. 더블클릭으로 점 초기화 가능'; });
+
+/* 리사이즈 */
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
