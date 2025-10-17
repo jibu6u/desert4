@@ -3,11 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>WebXR 원추 이중 헬릭스 + 멀티 비디오 스크린 (선택 재생/플레이리스트 + 앞부분 재생)</title>
+<title>WebXR 원추 이중 헬릭스 + 멀티 비디오 스크린 (VR 스크롤/10초 재생 개선)</title>
 <style>
   :root{color-scheme:dark}
   html,body{margin:0;height:100%;background:#000;font-family:system-ui,Segoe UI,Roboto,Apple SD Gothic Neo,Malgun Gothic,sans-serif}
-  #ui{position:fixed;left:12px;top:12px;z-index:20;background:rgba(0,0,0,.72);color:#fff;padding:12px 14px;border-radius:14px;min-width:400px;max-width:min(92vw,680px);backdrop-filter:blur(6px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+  body{overscroll-behavior:contain}
+
+  #ui{position:fixed;left:12px;top:12px;z-index:20;background:rgba(0,0,0,.72);color:#fff;padding:12px 14px;border-radius:14px;
+      min-width:400px;max-width:min(92vw,680px);backdrop-filter:blur(6px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
   #ui h3{margin:0 0 8px;font-size:16px}
   #ui h4{margin:14px 0 6px;font-size:14px;opacity:.9}
   #ui label{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0}
@@ -24,7 +27,8 @@
   #videoListBox{margin-top:6px;border:1px solid #333;border-radius:10px;padding:8px;background:#0f0f0f}
   #videoListHead{display:flex;align-items:center;justify-content:space-between}
   #videoCount{font-size:12px;opacity:.85}
-  #videoList{list-style:none;margin:6px 0 0;padding:0;max-height:220px;overflow:auto}
+  #videoList{list-style:none;margin:6px 0 0;padding:0;max-height:220px;overflow:auto;
+             -webkit-overflow-scrolling:touch; overscroll-behavior:contain; touch-action:pan-y}
   #videoList li{display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;border:1px solid #242424;margin:4px 0}
   #videoList li:hover{background:#141414}
   #videoList li.active{border-color:#7fb3ff;background:#111a24}
@@ -55,6 +59,7 @@
   <div id="row">
     <button id="screenToggle">스크린 켜기</button>
     <button id="loadSample">사막 샘플 추가</button>
+    <button id="playAllBtn" title="목록 전체를 트레일러 모드(앞부분)로 자동 재생">Play All (Snippet)</button>
   </div>
   <label>영상 파일(여러 개 선택 가능)
     <input id="desertFiles" type="file" accept="video/*" multiple>
@@ -68,7 +73,7 @@
       <div><strong>업로드/추가 목록</strong></div>
       <div id="videoCount">0 / 10</div>
     </div>
-    <div id="row" style="justify-content:flex-end">
+    <div id="row" style="justify-content:flex-end;gap:6px">
       <button id="scrollUpBtn">리스트 ↑</button>
       <button id="scrollDownBtn">리스트 ↓</button>
     </div>
@@ -108,47 +113,30 @@ import { VRButton } from "https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRB
    기존 UI 참조
 ========================= */
 const ui={
-  start:document.getElementById('startBtn'),
-  stop:document.getElementById('stopBtn'),
-  enterVR:document.getElementById('enterVR'),
-  pool:document.getElementById('pool'),
-  pick:document.getElementById('pick'),
-  rangeR:document.getElementById('rangeR'),
-  height:document.getElementById('height'),
-  spin:document.getElementById('spin'),
-  twist:document.getElementById('twist'),
-  tilt:document.getElementById('tilt'),
-  smoothAlpha:document.getElementById('smoothAlpha'),
-  status:document.getElementById('status'),
-  // 스크린 관련
-  screenToggle:document.getElementById('screenToggle'),
-  loadSample:document.getElementById('loadSample'),
-  desertFiles:document.getElementById('desertFiles'),
-  desertUrl:document.getElementById('desertUrl'),
-  addUrl:document.getElementById('addUrl'),
-  screenDist:document.getElementById('screenDist'),
-  screenWidth:document.getElementById('screenWidth'),
-  mute:document.getElementById('mute'),
-  videoList:document.getElementById('videoList'),
-  videoCount:document.getElementById('videoCount'),
-  nowPlaying:document.getElementById('nowPlaying'),
-  prevBtn:document.getElementById('prevBtn'),
-  nextBtn:document.getElementById('nextBtn'),
-  playSelectedBtn:document.getElementById('playSelectedBtn'),
-  clearSelectedBtn:document.getElementById('clearSelectedBtn'),
-  // 스크롤 보조 버튼
-  scrollUpBtn:document.getElementById('scrollUpBtn'),
-  scrollDownBtn:document.getElementById('scrollDownBtn'),
+  start:qs('#startBtn'), stop:qs('#stopBtn'), enterVR:qs('#enterVR'),
+  pool:qs('#pool'), pick:qs('#pick'), rangeR:qs('#rangeR'), height:qs('#height'),
+  spin:qs('#spin'), twist:qs('#twist'), tilt:qs('#tilt'), smoothAlpha:qs('#smoothAlpha'),
+  status:qs('#status'),
+
+  // 비디오/스크린
+  screenToggle:qs('#screenToggle'), loadSample:qs('#loadSample'),
+  desertFiles:qs('#desertFiles'), desertUrl:qs('#desertUrl'), addUrl:qs('#addUrl'),
+  screenDist:qs('#screenDist'), screenWidth:qs('#screenWidth'), mute:qs('#mute'),
+  videoList:qs('#videoList'), videoCount:qs('#videoCount'), nowPlaying:qs('#nowPlaying'),
+  prevBtn:qs('#prevBtn'), nextBtn:qs('#nextBtn'),
+  playSelectedBtn:qs('#playSelectedBtn'), clearSelectedBtn:qs('#clearSelectedBtn'),
+  scrollUpBtn:qs('#scrollUpBtn'), scrollDownBtn:qs('#scrollDownBtn'),
+  playAllBtn:qs('#playAllBtn'),
+
   // 트레일러 모드
-  snippetMode:document.getElementById('snippetMode'),
-  snippetSec:document.getElementById('snippetSec'),
-  snippetSecLabel:document.getElementById('snippetSecLabel'),
+  snippetMode:qs('#snippetMode'), snippetSec:qs('#snippetSec'), snippetSecLabel:qs('#snippetSecLabel'),
 };
+function qs(s){ return document.querySelector(s); }
 
 /* =========================
    점 7개 → 시드
 ========================= */
-const pCanvas=document.getElementById('pointsCanvas');
+const pCanvas=qs('#pointsCanvas');
 const pCtx=pCanvas.getContext('2d');
 let P_W=360,P_H=360; let points=[];
 function resizePointCanvas(){
@@ -161,11 +149,16 @@ function resizePointCanvas(){
 function drawPoints(){
   pCtx.fillStyle='#0d0d0d'; pCtx.fillRect(0,0,P_W,P_H);
   pCtx.strokeStyle='#1b1b1b'; pCtx.lineWidth=1;
-  for(let i=0;i<=10;i++){ const x=(P_W/10)*i,y=(P_H/10)*i; pCtx.beginPath(); pCtx.moveTo(x,0); pCtx.lineTo(x,P_H); pCtx.stroke(); pCtx.beginPath(); pCtx.moveTo(0,y); pCtx.lineTo(P_W,y); pCtx.stroke(); }
+  for(let i=0;i<=10;i++){
+    const x=(P_W/10)*i,y=(P_H/10)*i;
+    pCtx.beginPath(); pCtx.moveTo(x,0); pCtx.lineTo(x,P_H); pCtx.stroke();
+    pCtx.beginPath(); pCtx.moveTo(0,y); pCtx.lineTo(P_W,y); pCtx.stroke();
+  }
   if(points.length){
     pCtx.fillStyle='#ffee66';
     for(const p of points){ pCtx.beginPath(); pCtx.arc(p.x,p.y,8,0,Math.PI*2); pCtx.fill(); }
-    pCtx.strokeStyle='#ffeb3b'; pCtx.lineWidth=3; pCtx.beginPath(); pCtx.moveTo(points[0].x,points[0].y);
+    pCtx.strokeStyle='#ffeb3b'; pCtx.lineWidth=3;
+    pCtx.beginPath(); pCtx.moveTo(points[0].x,points[0].y);
     for(let i=1;i<points.length;i++) pCtx.lineTo(points[i].x,points[i].y);
     if(points.length===7) pCtx.lineTo(points[0].x,points[0].y);
     pCtx.stroke();
@@ -178,7 +171,10 @@ function addPointXY(clientX,clientY){
   if(x<0||y<0||x>rect.width*dpr||y>rect.height*dpr) return;
   points.push({x,y}); drawPoints(); ui.status.textContent=`상태: 점 ${points.length}/7`;
 }
-function handlePointer(e){ if(e.type==='pointerdown'||e.type==='mousedown'){ addPointXY(e.clientX,e.clientY); } else if(e.type==='touchstart'){ const t=e.changedTouches&&e.changedTouches[0]; if(t) addPointXY(t.clientX,t.clientY); } }
+function handlePointer(e){
+  if(e.type==='pointerdown'||e.type==='mousedown'){ addPointXY(e.clientX,e.clientY); }
+  else if(e.type==='touchstart'){ const t=e.changedTouches&&e.changedTouches[0]; if(t) addPointXY(t.clientX,t.clientY); }
+}
 pCanvas.addEventListener('pointerdown',handlePointer,{passive:true});
 pCanvas.addEventListener('mousedown',handlePointer,{passive:true});
 pCanvas.addEventListener('touchstart',e=>{e.preventDefault();handlePointer(e)},{passive:false});
@@ -226,18 +222,18 @@ ui.enterVR.addEventListener('click',()=>{
 });
 
 /* =========================
-   사막 스크린 (영상 플레인) + 선택 재생 + 트레일러 모드
+   사막 스크린 (영상) + 선택 재생 + 트레일러 모드
 ========================= */
 let screenMesh=null, videoTex=null;
 const videoEl=document.createElement('video');
-videoEl.crossOrigin = "anonymous";
-videoEl.playsInline = true;
-videoEl.loop = false; // 플레이리스트/앞부분 재생을 위해 loop 비활성
-videoEl.muted = ui.mute.checked;
+videoEl.crossOrigin="anonymous";
+videoEl.playsInline=true;
+videoEl.loop=false; // 플레이리스트/앞부분 재생을 위해 loop 비활성
+videoEl.muted=ui.mute.checked;
 
 // 비디오 리스트 상태
 const MAX_ITEMS=10;
-const videos=[]; // {name, url, source: 'file'|'url'|'sample'}
+const videos=[]; // {name,url,source}
 let playingIndex=-1;
 let queueMode=false; // 선택 재생 모드
 let queueList=[];    // 인덱스 배열 (선택 순서)
@@ -248,54 +244,49 @@ let snippetEnabled=true;
 let snippetSeconds=10;
 
 function ensureScreen(){
-  const dist = Number(ui.screenDist.value)||10;
-  const width = Number(ui.screenWidth.value)||12;
-  const height = width * 9/16; // 16:9
+  const dist=Number(ui.screenDist.value)||10;
+  const width=Number(ui.screenWidth.value)||12;
+  const height=width*9/16;
   if(!screenMesh){
-    const geo = new THREE.PlaneGeometry(width, height);
-    const mat = new THREE.MeshBasicMaterial({color:0xffffff, side:THREE.FrontSide});
-    screenMesh = new THREE.Mesh(geo, mat);
-    screenMesh.position.set(0, 1.6, -dist);
+    const geo=new THREE.PlaneGeometry(width,height);
+    const mat=new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.FrontSide});
+    screenMesh=new THREE.Mesh(geo,mat);
+    screenMesh.position.set(0,1.6,-dist);
     scene.add(screenMesh);
   }else{
     screenMesh.geometry.dispose();
-    screenMesh.geometry = new THREE.PlaneGeometry(width, height);
-    screenMesh.position.z = -dist;
+    screenMesh.geometry=new THREE.PlaneGeometry(width,height);
+    screenMesh.position.z=-dist;
   }
-  screenMesh.visible = true;
-  ui.screenToggle.textContent = "스크린 끄기";
+  screenMesh.visible=true;
+  ui.screenToggle.textContent="스크린 끄기";
 }
 
-function setVideoSrcAndPlay(src, label){
+function setVideoSrcAndPlay(src,label){
   try{
-    videoEl.src = src;
-    videoEl.muted = ui.mute.checked;
-    const onLoaded=()=>{
-      videoEl.removeEventListener('loadedmetadata', onLoaded);
-      if(snippetEnabled){ videoEl.currentTime = 0; }
-    };
-    videoEl.addEventListener('loadedmetadata', onLoaded);
+    videoEl.src=src;
+    videoEl.muted=ui.mute.checked;
+    const onLoaded=()=>{ videoEl.removeEventListener('loadedmetadata',onLoaded); if(snippetEnabled){ videoEl.currentTime=0; } };
+    videoEl.addEventListener('loadedmetadata',onLoaded);
 
     videoEl.play().then(()=>{
       if(!videoTex){
-        videoTex = new THREE.VideoTexture(videoEl);
-        videoTex.colorSpace = THREE.SRGBColorSpace;
-        videoTex.minFilter = THREE.LinearFilter;
-        videoTex.magFilter = THREE.LinearFilter;
+        videoTex=new THREE.VideoTexture(videoEl);
+        videoTex.colorSpace=THREE.SRGBColorSpace;
+        videoTex.minFilter=THREE.LinearFilter;
+        videoTex.magFilter=THREE.LinearFilter;
       }
       ensureScreen();
-      screenMesh.material.map = videoTex;
-      screenMesh.material.needsUpdate = true;
-      ui.status.textContent = `상태: 재생 중 — ${label||'영상'}`;
-      ui.nowPlaying.textContent = `현재 재생: ${label||'영상'}`;
+      screenMesh.material.map=videoTex;
+      screenMesh.material.needsUpdate=true;
+      ui.status.textContent=`상태: 재생 중 — ${label||'영상'}`;
+      ui.nowPlaying.textContent=`현재 재생: ${label||'영상'}`;
       renderVideoList();
     }).catch(err=>{
       console.warn(err);
-      ui.status.textContent = "상태: 자동재생 실패 — 항목을 다시 클릭/재생해 주세요.";
+      ui.status.textContent="상태: 자동재생 실패 — 항목을 다시 클릭/재생해 주세요.";
     });
-  }catch(e){
-    console.warn(e);
-  }
+  }catch(e){ console.warn(e); }
 }
 
 function getSequenceIndices(){
@@ -304,29 +295,46 @@ function getSequenceIndices(){
   return videos.map((_,i)=>i);
 }
 
+// 다음/이전 이동 (선택재생/전체재생 모두 대응)
 function gotoNextInSequence(){
   const seq=getSequenceIndices();
   if(seq.length===0) return;
-  let currentPos = seq.indexOf(playingIndex);
-  if(currentPos===-1){ currentPos= -1; }
-  const nextPos = currentPos + 1;
-  if(nextPos < seq.length){
-    const nextIdx = seq[nextPos];
-    ui.nowPlaying.textContent = `현재 재생: ${videos[nextIdx].name} (${Math.min(nextPos+1,seq.length)}/${seq.length})`;
-    playVideoAt(nextIdx, {fromQueue: queueMode});
+  let currentPos=seq.indexOf(playingIndex);
+  if(currentPos===-1) currentPos=-1;
+  const nextPos=currentPos+1;
+  if(nextPos<seq.length){
+    const nextIdx=seq[nextPos];
+    ui.nowPlaying.textContent=`현재 재생: ${videos[nextIdx].name} (${Math.min(nextPos+1,seq.length)}/${seq.length})`;
+    playVideoAt(nextIdx,{fromQueue:queueMode});
   }else{
-    // 끝났을 때 큐 모드 해제
     queueMode=false; queueList=[]; queuePos=0;
     ui.status.textContent='상태: 순차 재생 완료';
   }
 }
+function gotoPrevInSequence(){
+  const seq=getSequenceIndices();
+  if(seq.length===0) return;
+  let currentPos=seq.indexOf(playingIndex);
+  if(currentPos<=0){
+    // 맨 앞 또는 아직 시작 전이면 맨 뒤로
+    const idx=seq[seq.length-1];
+    playVideoAt(idx,{fromQueue:queueMode});
+  }else{
+    const idx=seq[currentPos-1];
+    playVideoAt(idx,{fromQueue:queueMode});
+  }
+}
 
 // 앞부분(초)만 재생: currentTime 감시하여 초과 시 다음으로
-videoEl.addEventListener('timeupdate', ()=>{
-  if(snippetEnabled && videoEl.duration && videoEl.currentTime >= Math.min(snippetSeconds, Math.max(0, videoEl.duration-0.1)) ){
-    gotoNextInSequence();
-  }
+videoEl.addEventListener('timeupdate',()=>{
+  if(!snippetEnabled) return;
+  if(!videoEl.duration) return;
+  const limit=Math.min(snippetSeconds, Math.max(0, videoEl.duration-0.1));
+  if(videoEl.currentTime>=limit){ gotoNextInSequence(); }
 });
+
+// 자연 종료 시 다음으로
+videoEl.addEventListener('ended', ()=>{ gotoNextInSequence(); });
 
 /* =========================
    선택/목록/파일/URL 처리
@@ -334,110 +342,93 @@ videoEl.addEventListener('timeupdate', ()=>{
 // 선택 상태(선택 순서를 유지)
 let selectionOrder=[]; // 인덱스를 선택한 순서대로
 
-function addVideoItem(name, url, source){
+function addVideoItem(name,url,source){
   if(videos.length>=MAX_ITEMS){ alert(`최대 ${MAX_ITEMS}개까지만 추가할 수 있습니다.`); return false; }
-  videos.push({name, url, source});
+  videos.push({name,url,source});
   renderVideoList();
   return true;
 }
 
 function renderVideoList(){
   ui.videoList.innerHTML='';
-  ui.videoCount.textContent = `${videos.length} / ${MAX_ITEMS}`;
+  ui.videoCount.textContent=`${videos.length} / ${MAX_ITEMS}`;
 
   const orderMap=new Map();
-  selectionOrder.forEach((idx, i)=> orderMap.set(idx, i+1));
+  selectionOrder.forEach((idx,i)=>orderMap.set(idx,i+1));
 
   videos.forEach((v,idx)=>{
-    const li=document.createElement('li');
-    li.dataset.index=idx;
+    const li=document.createElement('li'); li.dataset.index=idx;
     if(idx===playingIndex) li.classList.add('active');
 
-    const chk=document.createElement('input');
-    chk.type='checkbox';
-    chk.checked = orderMap.has(idx);
-    chk.addEventListener('change', (ev)=> toggleSelect(idx, ev.target.checked));
+    const chk=document.createElement('input'); chk.type='checkbox';
+    chk.checked=orderMap.has(idx);
+    chk.addEventListener('change',(ev)=>toggleSelect(idx, ev.target.checked));
 
-    const order=document.createElement('span');
-    order.className='badge order';
-    const ord=orderMap.get(idx);
-    order.textContent = ord? `선택${ord}` : '';
+    const order=document.createElement('span'); order.className='badge order';
+    const ord=orderMap.get(idx); order.textContent=ord?`선택${ord}`:'';
 
-    const badge=document.createElement('span');
-    badge.className='badge';
+    const badge=document.createElement('span'); badge.className='badge';
     badge.textContent = idx===playingIndex? '▶ 재생중' : (v.source==='file'?'파일': (v.source==='url'?'URL':'샘플'));
 
-    const name=document.createElement('span');
-    name.className='truncate';
-    name.title=v.name;
-    name.textContent=v.name;
-    name.style.cursor='pointer';
-    name.addEventListener('click',()=>{ playVideoAt(idx); });
+    const name=document.createElement('span'); name.className='truncate'; name.title=v.name; name.textContent=v.name;
+    name.style.cursor='pointer'; name.addEventListener('click',()=>{ playVideoAt(idx); });
 
-    li.appendChild(chk);
-    li.appendChild(order);
-    li.appendChild(badge);
-    li.appendChild(name);
+    li.appendChild(chk); li.appendChild(order); li.appendChild(badge); li.appendChild(name);
     ui.videoList.appendChild(li);
   });
 }
 
-function toggleSelect(idx, checked){
-  if(checked){
-    if(!selectionOrder.includes(idx)) selectionOrder.push(idx);
-  }else{
-    selectionOrder = selectionOrder.filter(i=>i!==idx);
-  }
+function toggleSelect(idx,checked){
+  if(checked){ if(!selectionOrder.includes(idx)) selectionOrder.push(idx); }
+  else{ selectionOrder=selectionOrder.filter(i=>i!==idx); }
   renderVideoList();
 }
 
-function playVideoAt(idx, opts={fromQueue:false}){
+function playVideoAt(idx,opts={fromQueue:false}){
   if(idx<0 || idx>=videos.length) return;
   if(!opts.fromQueue){ queueMode=false; queueList=[]; queuePos=0; }
-  playingIndex = idx;
-  const item = videos[idx];
+  playingIndex=idx;
+  const item=videos[idx];
   ensureScreen();
-  setVideoSrcAndPlay(item.url, item.name);
+  setVideoSrcAndPlay(item.url,item.name);
 }
 
 function startSelectedPlayback(){
   if(selectionOrder.length===0){ alert('선택된 영상이 없습니다. 체크박스로 하나 이상 선택하세요.'); return; }
-  queueMode = true;
-  queueList = selectionOrder.slice(); // 선택한 순서
-  queuePos = 0;
-  const firstIdx = queueList[0];
-  ui.nowPlaying.textContent = `현재 재생: ${videos[firstIdx].name} (1/${queueList.length})`;
-  playVideoAt(firstIdx, {fromQueue:true});
+  queueMode=true;
+  queueList=selectionOrder.slice(); // 선택한 순서
+  queuePos=0;
+  const firstIdx=queueList[0];
+  ui.nowPlaying.textContent=`현재 재생: ${videos[firstIdx].name} (1/${queueList.length})`;
+  playVideoAt(firstIdx,{fromQueue:true});
 }
 
 // 파일 여러 개 추가
-ui.desertFiles.addEventListener('change', (e)=>{
-  const files = Array.from(e.target.files||[]);
+ui.desertFiles.addEventListener('change',(e)=>{
+  const files=Array.from(e.target.files||[]);
   if(!files.length) return;
-  const remain = MAX_ITEMS - videos.length;
+  const remain=MAX_ITEMS - videos.length;
   if(remain<=0){ alert(`이미 ${MAX_ITEMS}개가 채워졌습니다.`); return; }
-  const slice = files.slice(0, remain);
+  const slice=files.slice(0,remain);
   slice.forEach((f)=>{
-    const url = URL.createObjectURL(f);
-    addVideoItem(f.name, url, 'file');
+    const url=URL.createObjectURL(f);
+    addVideoItem(f.name,url,'file');
   });
   if(playingIndex<0 && videos.length>0){ playVideoAt(0); }
   ui.desertFiles.value='';
 });
 
 // URL 추가
-ui.addUrl.addEventListener('click', ()=>{
-  const url = (ui.desertUrl.value||'').trim();
+ui.addUrl.addEventListener('click',()=>{
+  const url=(ui.desertUrl.value||'').trim();
   if(!url){ alert('영상 URL을 입력하세요.'); return; }
-  const name = url.split('/').pop()||'영상(URL)';
-  if(addVideoItem(name, url, 'url')){
-    ui.status.textContent = '상태: URL이 목록에 추가되었습니다.';
-  }
+  const name=url.split('/').pop()||'영상(URL)';
+  if(addVideoItem(name,url,'url')){ ui.status.textContent='상태: URL이 목록에 추가되었습니다.'; }
 });
 
-// 샘플 추가 (Coverr 공개 샘플)
-ui.loadSample.addEventListener('click', ()=>{
-  const sample = "https://cdn.coverr.co/videos/coverr-sand-dunes-1619/1080p.mp4";
+// 샘플 추가
+ui.loadSample.addEventListener('click',()=>{
+  const sample="https://cdn.coverr.co/videos/coverr-sand-dunes-1619/1080p.mp4";
   addVideoItem('사막 샘플(mp4)', sample, 'sample');
 });
 
@@ -445,56 +436,74 @@ ui.loadSample.addEventListener('click', ()=>{
 ui.playSelectedBtn.addEventListener('click', startSelectedPlayback);
 ui.clearSelectedBtn.addEventListener('click', ()=>{ selectionOrder=[]; renderVideoList(); });
 
-// 트레일러 모드 UI
-ui.snippetMode.addEventListener('change', ()=>{ snippetEnabled = ui.snippetMode.checked; });
-ui.snippetSec.addEventListener('input', ()=>{ snippetSeconds = Number(ui.snippetSec.value)||10; ui.snippetSecLabel.textContent = `${snippetSeconds}s`; });
-snippetEnabled = true; snippetSeconds = 10; ui.snippetSecLabel.textContent = '10s';
+// **Play All (Snippet)** — 선택 없이 전체 리스트를 트레일러 모드로 자동 재생
+ui.playAllBtn.addEventListener('click', ()=>{
+  if(videos.length===0){ alert('목록이 비어있습니다. 파일을 추가하세요.'); return; }
+  queueMode=false; // 전체 순회
+  playingIndex=-1; // 처음부터 시작
+  gotoNextInSequence(); // 첫 항목 재생 시작
+});
 
-// 리스트 스크롤(버튼) — VR DOM overlay에서 스크롤다운 대체
+// [다음]/[이전] 버튼 연결 (없던 핸들러 추가)
+ui.nextBtn.addEventListener('click', gotoNextInSequence);
+ui.prevBtn.addEventListener('click', gotoPrevInSequence);
+
+// 트레일러 모드 UI
+ui.snippetMode.addEventListener('change', ()=>{ snippetEnabled=ui.snippetMode.checked; });
+ui.snippetSec.addEventListener('input', ()=>{ snippetSeconds=Number(ui.snippetSec.value)||10; ui.snippetSecLabel.textContent=`${snippetSeconds}s`; });
+snippetEnabled=true; snippetSeconds=10; ui.snippetSecLabel.textContent='10s';
+
+/* VR에서 스크롤이 어려운 경우를 위해: 버튼 꾹 누르면 연속 스크롤 */
+function addPressHoldScroll(btn, dir){ // dir: -1=up, +1=down
+  let timer=null;
+  const step=()=>{ ui.videoList.scrollTop += dir * (ui.videoList.clientHeight*0.12); };
+  const start=()=>{ step(); timer=setInterval(step, 80); };
+  const stop =()=>{ if(timer){ clearInterval(timer); timer=null; } };
+  btn.addEventListener('pointerdown', start);
+  btn.addEventListener('pointerup', stop);
+  btn.addEventListener('pointerleave', stop);
+  btn.addEventListener('pointercancel', stop);
+}
+addPressHoldScroll(ui.scrollUpBtn,-1);
+addPressHoldScroll(ui.scrollDownBtn,1);
+
+// 클릭 1회로도 크게 이동
 ui.scrollUpBtn.addEventListener('click', ()=>{ ui.videoList.scrollTop = Math.max(0, ui.videoList.scrollTop - ui.videoList.clientHeight*0.8); });
 ui.scrollDownBtn.addEventListener('click', ()=>{ ui.videoList.scrollTop = ui.videoList.scrollTop + ui.videoList.clientHeight*0.8; });
-
-// 자연 종료 시 다음으로
-videoEl.addEventListener('ended', ()=>{ gotoNextInSequence(); });
 
 /* =========================
    원추 이중 헬릭스
 ========================= */
 const palette=[0x32cd32,0x00ff7f,0x9acd32,0xffff00,0xffd700,0xf0e68c,0x9370db,0x8a2be2,0xba55d3,0x1e90ff,0x87cefa,0xff6347,0xff4500].map(v=>new THREE.Color(v));
-
-const state={
-  running:false,
-  pool:1200,
-  pick:200,
-  height:4.0,
-  segY:220,
-  objsA:[], objsB:[],
-  colNowA:[], colNowB:[], colTgtA:[], colTgtB:[],
-};
+const state={ running:false, pool:1200, pick:200, height:4.0, segY:220,
+  objsA:[], objsB:[], colNowA:[], colNowB:[], colTgtA:[], colTgtB:[] };
 
 function initHelices(){
   for(const o of state.objsA) scene.remove(o); for(const o of state.objsB) scene.remove(o);
   state.objsA.length=0; state.objsB.length=0; state.colNowA.length=0; state.colNowB.length=0; state.colTgtA.length=0; state.colTgtB.length=0;
 
-  const seg=state.segY; const geomT=new THREE.BufferGeometry(); geomT.setAttribute('position',new THREE.BufferAttribute(new Float32Array(seg*3),3));
+  const seg=state.segY; const geomT=new THREE.BufferGeometry();
+  geomT.setAttribute('position',new THREE.BufferAttribute(new Float32Array(seg*3),3));
 
   const poolN=Math.max(200,Math.min(4000,Number(ui.pool.value)||1200));
   const pickN=Math.max(100,Math.min(poolN,Number(ui.pick.value)||200));
   const pickHalf=Math.floor(pickN/2);
 
-  const sd=computeSeed(); rng=mulberry32(sd); ui.status.textContent=`상태: 시드 0x${sd.toString(16)} / 선택 ${pickN}개 (A ${pickHalf}, B ${pickN-pickHalf})`;
+  const sd=computeSeed(); rng=mulberry32(sd);
+  ui.status.textContent=`상태: 시드 0x${sd.toString(16)} / 선택 ${pickN}개 (A ${pickHalf}, B ${pickN-pickHalf})`;
 
-  const chosen=new Set(); while(chosen.size<pickN){ const idx=Math.floor(rng()*poolN); chosen.add(idx); }
   function newLine(){ const g=geomT.clone(); const m=new THREE.LineBasicMaterial({vertexColors:false}); const l=new THREE.Line(g,m); scene.add(l); return l; }
 
   for(let i=0;i<pickHalf;i++){
     const line=newLine(); state.objsA.push(line);
-    const c=palette[Math.floor(rng()*palette.length)].clone(); const t=palette[Math.floor(rng()*palette.length)].clone();
+    const c=palette[Math.floor(Math.random()*palette.length)].clone();
+    const t=palette[Math.floor(Math.random()*palette.length)].clone();
     state.colNowA.push(c); state.colTgtA.push(t);
   }
   for(let i=pickHalf;i<pickN;i++){
     const line=newLine(); state.objsB.push(line);
-    const c=palette[Math.floor(rng()*palette.length)].clone(); const t=palette[Math.floor(rng()*palette.length)].clone();
+    const c=palette[Math.floor(Math.random()*palette.length)].clone();
+    const t=palette[Math.floor(Math.random()*palette.length)].clone();
     state.colNowB.push(c); state.colTgtB.push(t);
   }
 }
@@ -502,7 +511,8 @@ function initHelices(){
 function retargetColors(){
   const changeCount=Math.max(1,Math.floor((state.objsA.length+state.objsB.length)*0.3));
   for(let k=0;k<changeCount;k++){
-    const list=Math.random()<0.5?state.colTgtA:state.colTgtB; const i=Math.floor(Math.random()*list.length);
+    const list=Math.random()<0.5?state.colTgtA:state.colTgtB;
+    const i=Math.floor(Math.random()*list.length);
     list[i]=palette[Math.floor(Math.random()*palette.length)].clone();
   }
 }
@@ -511,7 +521,7 @@ function startColorTimer(){ if(colorTimer) clearInterval(colorTimer); colorTimer
 function stopColorTimer(){ if(colorTimer){ clearInterval(colorTimer); colorTimer=null; } }
 
 const clock=new THREE.Clock();
-function animate(){ renderer.setAnimationLoop(render); }
+renderer.setAnimationLoop(render);
 function render(){
   const t=clock.getElapsedTime();
   if(state.running){ updateHelixLines(t); }
@@ -528,21 +538,20 @@ function updateHelixLines(t){
       const line=list[i];
       colNow[i].lerp(colTgt[i], smooth); line.material.color.copy(colNow[i]);
       const pos=line.geometry.attributes.position.array; let p=0;
-      const phase0 = i * (Math.PI*2/24) + i*0.0013;
+      const phase0=i*(Math.PI*2/24)+i*0.0013;
       for(let s=0;s<seg;s++){
-        const H = Number(ui.height.value||4.0);
-        const y = - H/2 + s*stepY;
-        const hNorm=(y + H/2) / H;
-        const radius = baseR * Math.pow(1 - hNorm, 0.85);
-        const phase = (y / (twist/1000)) * Math.PI*2 + t*spin*phaseSign + phase0;
-        const x = Math.sin(phase) * radius + (phaseSign>0? +tilt : -tilt);
-        const z = Math.cos(phase) * radius;
-        pos[p++]=x; pos[p++]=1.0 + y; pos[p++]=z;
+        const H=Number(ui.height.value||4.0);
+        const y=-H/2 + s*stepY;
+        const hNorm=(y + H/2)/H;
+        const radius=baseR * Math.pow(1 - hNorm, 0.85);
+        const phase=(y/(twist/1000))*Math.PI*2 + t*spin*phaseSign + phase0;
+        const x=Math.sin(phase)*radius + (phaseSign>0? +tilt : -tilt);
+        const z=Math.cos(phase)*radius;
+        pos[p++]=x; pos[p++]=1.0+y; pos[p++]=z;
       }
       line.geometry.attributes.position.needsUpdate=true;
     }
   }
-
   updateGroup(state.objsA, state.colNowA, state.colTgtA, +1);
   updateGroup(state.objsB, state.colNowB, state.colTgtB, -1);
 }
@@ -558,8 +567,6 @@ ui.stop.addEventListener('click',()=>{ state.running=false; stopColorTimer(); ui
 window.addEventListener('resize',()=>{
   camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight);
 });
-
-animate();
 </script>
 </body>
 </html>
